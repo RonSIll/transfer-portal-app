@@ -73,6 +73,13 @@
     font-size: 12px; font-weight: 500; text-transform: uppercase;
     letter-spacing: 0.06em; color: var(--text2);
   }
+  .header-controls { display: flex; align-items: center; gap: 16px; }
+  .text-btn {
+    border: none; background: none; color: var(--text2);
+    font-size: 12px; font-weight: 500; cursor: pointer; padding: 4px 2px;
+  }
+  .text-btn:hover { color: var(--red); }
+  .text-btn:disabled { opacity: 0.5; cursor: default; color: var(--text2); }
   .refresh-btn {
     display: flex; align-items: center; gap: 5px; border: none; background: none;
     color: var(--text2); font-size: 12px; font-weight: 500; cursor: pointer; padding: 4px 2px;
@@ -89,11 +96,19 @@
   .file-info { flex: 1 1 auto; min-width: 0; }
   .file-name { font-size: 14px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-size { font-size: 12px; color: var(--text2); margin-top: 2px; }
+  .file-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
   .download-btn {
     flex: 0 0 auto; border: none; background: var(--accent); color: #fff;
     font-size: 13px; font-weight: 500; padding: 8px 14px; border-radius: 8px; cursor: pointer;
   }
   .download-btn:disabled { opacity: 0.6; cursor: default; }
+  .delete-btn {
+    flex: 0 0 auto; border: none; background: none; color: var(--text3);
+    width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+    border-radius: 8px; cursor: pointer;
+  }
+  .delete-btn:hover { color: var(--red); background: var(--bg); }
+  .delete-btn:disabled { opacity: 0.5; cursor: default; }
 
   .empty-state { color: var(--text3); font-size: 14px; padding: 30px 20px; text-align: center; }
 
@@ -154,15 +169,18 @@
   <div class="status-line" id="statusLine"></div>
 
   <div class="queue-header">
-    <span class="label">Waiting</span>
-    <button class="refresh-btn" id="refreshBtn">
-      <svg id="refreshIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="23 4 23 10 17 10"/>
-        <polyline points="1 20 1 14 7 14"/>
-        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-      </svg>
-      Refresh
-    </button>
+    <span class="label" id="queueLabel">Waiting</span>
+    <div class="header-controls">
+      <button class="text-btn" id="deleteAllBtn" hidden>Delete all</button>
+      <button class="refresh-btn" id="refreshBtn">
+        <svg id="refreshIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/>
+          <polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+        Refresh
+      </button>
+    </div>
   </div>
   <div id="queueList"></div>
 </div>
@@ -209,6 +227,8 @@
     fileInput: document.getElementById("fileInput"),
     statusLine: document.getElementById("statusLine"),
     queueList: document.getElementById("queueList"),
+    queueLabel: document.getElementById("queueLabel"),
+    deleteAllBtn: document.getElementById("deleteAllBtn"),
     refreshBtn: document.getElementById("refreshBtn"),
     refreshIcon: document.getElementById("refreshIcon"),
     settingsBtn: document.getElementById("settingsBtn"),
@@ -364,11 +384,9 @@
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        return deleteFile(item);
-      })
-      .then(function () {
         setStatus(item.name + " downloaded.");
-        listFiles();
+        btn.disabled = false;
+        btn.textContent = "Download";
       })
       .catch(function (err) {
         setStatus("Couldn't download " + item.name + ": " + err.message, true);
@@ -381,10 +399,42 @@
     return fetch(apiUrl(item.path), {
       method: "DELETE",
       headers: Object.assign({ "Content-Type": "application/json" }, jsonHeaders()),
-      body: JSON.stringify({ message: "Transfer Portal auto-delete: " + item.name, sha: item.sha })
+      body: JSON.stringify({ message: "Transfer Portal delete: " + item.name, sha: item.sha })
     }).then(function (res) {
-      if (!res.ok) throw new Error("Cleanup failed (" + res.status + ")");
+      if (!res.ok) throw new Error("Delete failed (" + res.status + ")");
     });
+  }
+
+  function deleteRow(item, btn) {
+    if (!window.confirm('Delete "' + item.name + '"? This can\'t be undone.')) return;
+    btn.disabled = true;
+    deleteFile(item)
+      .then(function () {
+        setStatus(item.name + " deleted.");
+        listFiles();
+      })
+      .catch(function (err) {
+        setStatus("Couldn't delete " + item.name + ": " + err.message, true);
+        btn.disabled = false;
+      });
+  }
+
+  function deleteAllFiles() {
+    if (state.files.length === 0) return;
+    var count = state.files.length;
+    if (!window.confirm("Delete all " + count + (count === 1 ? " file" : " files") + "? This can't be undone.")) return;
+    el.deleteAllBtn.disabled = true;
+    setStatus("Deleting all files…");
+    Promise.all(state.files.map(function (f) { return deleteFile(f); }))
+      .then(function () {
+        setStatus("All files deleted.");
+        listFiles();
+      })
+      .catch(function (err) {
+        setStatus("Couldn't delete all files: " + err.message, true);
+        listFiles();
+      })
+      .then(function () { el.deleteAllBtn.disabled = false; });
   }
 
   // ---------- Rendering ----------
@@ -393,8 +443,21 @@
     el.refreshIcon.classList.toggle("spin", on);
   }
 
+  function updateQueueLabel() {
+    if (!configured() || state.files.length === 0) {
+      el.queueLabel.textContent = "Waiting";
+      el.deleteAllBtn.hidden = true;
+      return;
+    }
+    var count = state.files.length;
+    var totalBytes = state.files.reduce(function (sum, f) { return sum + f.size; }, 0);
+    el.queueLabel.textContent = count + (count === 1 ? " file" : " files") + " · " + humanSize(totalBytes) + " total";
+    el.deleteAllBtn.hidden = false;
+  }
+
   function renderQueue() {
     el.queueList.innerHTML = "";
+    updateQueueLabel();
     if (!configured()) {
       var setup = document.createElement("div");
       setup.className = "empty-state";
@@ -435,11 +498,24 @@
     info.appendChild(size);
     row.appendChild(info);
 
+    var actions = document.createElement("div");
+    actions.className = "file-actions";
+
     var btn = document.createElement("button");
     btn.className = "download-btn";
     btn.textContent = "Download";
     btn.addEventListener("click", function () { downloadFile(item, btn); });
-    row.appendChild(btn);
+    actions.appendChild(btn);
+
+    var delBtn = document.createElement("button");
+    delBtn.className = "delete-btn";
+    delBtn.setAttribute("aria-label", "Delete " + item.name);
+    delBtn.title = "Delete";
+    delBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+    delBtn.addEventListener("click", function () { deleteRow(item, delBtn); });
+    actions.appendChild(delBtn);
+
+    row.appendChild(actions);
 
     return row;
   }
@@ -523,6 +599,7 @@
     if (!configured()) { openSettings(); return; }
     listFiles();
   });
+  el.deleteAllBtn.addEventListener("click", deleteAllFiles);
 
   el.settingsBtn.addEventListener("click", function () { openSettings(); });
   el.settingsClose.addEventListener("click", closeSettings);
