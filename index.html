@@ -17,6 +17,7 @@
     --border: #e3e3e6;
     --accent: #4f6bff;
     --red: #ff3b30;
+    --green: #34c759;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -28,6 +29,7 @@
       --border: #2c2c2e;
       --accent: #7b8fff;
       --red: #ff453a;
+      --green: #30d158;
     }
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -87,6 +89,8 @@
   }
   .mini-icon-btn:hover { color: var(--text); background: var(--bg2); }
   .mini-icon-btn:disabled { opacity: 0.5; cursor: default; }
+  .mini-icon-btn.restore { color: var(--green); }
+  .mini-icon-btn.restore:hover { color: var(--green); background: var(--bg2); }
   .refresh-btn {
     display: flex; align-items: center; gap: 5px; border: none; background: none;
     color: var(--text2); font-size: 12px; font-weight: 500; cursor: pointer; padding: 4px 2px;
@@ -118,6 +122,8 @@
   }
   .delete-btn:hover { color: var(--red); background: var(--bg); }
   .delete-btn:disabled { opacity: 0.5; cursor: default; }
+  .delete-btn.restore { color: var(--green); }
+  .delete-btn.restore:hover { color: var(--green); background: var(--bg); }
 
   .empty-state { color: var(--text3); font-size: 14px; padding: 30px 20px; text-align: center; }
 
@@ -189,7 +195,7 @@
         Ctrl-F5 to refresh
       </button>
       <button class="text-btn" id="deleteAllBtn" hidden>Delete all</button>
-      <button class="mini-icon-btn" id="deleteAllCancelBtn" hidden aria-label="Cancel delete all" title="Cancel">
+      <button class="mini-icon-btn restore" id="deleteAllCancelBtn" hidden aria-label="Cancel delete all" title="Cancel">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M9 14 4 9l5-5"/>
           <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/>
@@ -595,7 +601,7 @@
     actions.appendChild(btn);
 
     var delBtn = document.createElement("button");
-    delBtn.className = "delete-btn";
+    delBtn.className = "delete-btn" + (isPending ? " restore" : "");
     if (isPending) {
       delBtn.setAttribute("aria-label", "Restore " + item.name);
       delBtn.title = "Restore";
