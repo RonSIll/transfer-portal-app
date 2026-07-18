@@ -52,14 +52,20 @@
   .icon-btn:hover { background: var(--bg2); color: var(--text); }
 
   .dropzone {
-    border: 3px dashed var(--border); border-radius: 12px;
+    position: relative; border-radius: 12px;
     padding: 36px 16px; text-align: center; cursor: pointer;
-    color: var(--text2); transition: border-color 0.15s, background 0.15s;
+    color: var(--text2); transition: background 0.15s;
   }
-  .dropzone svg { display: block; margin: 0 auto 10px; color: var(--text3); }
+  .dropzone .dz-icon { display: block; margin: 0 auto 10px; color: var(--text3); }
   .dropzone .dz-title { font-size: 15px; font-weight: 500; color: var(--text); }
-  .dropzone.dragover { border-color: var(--accent); background: var(--bg2); }
+  .dropzone.dragover { background: var(--bg2); }
   .dropzone.disabled { opacity: 0.5; cursor: not-allowed; }
+  .dropzone-border { position: absolute; inset: 0; pointer-events: none; }
+  .dz-border-rect {
+    fill: none; stroke: var(--border); stroke-width: 5;
+    stroke-dasharray: 16 10; stroke-linecap: round; transition: stroke 0.15s;
+  }
+  .dropzone.dragover .dz-border-rect { stroke: var(--accent); }
 
   .status-line {
     min-height: 20px; font-size: 13px; color: var(--text2); padding: 10px 2px 0; text-align: center;
@@ -168,7 +174,10 @@
   </div>
 
   <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Drag file here or click to choose">
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <svg class="dropzone-border" width="100%" height="100%">
+      <rect class="dz-border-rect" style="x:2.5px; y:2.5px; width:calc(100% - 5px); height:calc(100% - 5px);" rx="12" ry="12"/>
+    </svg>
+    <svg class="dz-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
       <polyline points="17 8 12 3 7 8"/>
       <line x1="12" y1="3" x2="12" y2="15"/>
