@@ -107,6 +107,7 @@
   .download-btn {
     flex: 0 0 auto; border: none; background: var(--accent); color: #fff;
     font-size: 13px; font-weight: 500; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+    width: var(--download-btn-width, auto); text-align: center;
   }
   .download-btn:disabled { opacity: 0.6; cursor: default; }
   .download-btn.confirm-delete { background: var(--text3); }
@@ -703,7 +704,24 @@
   el.settingsSave.addEventListener("click", saveSettings);
   el.backdrop.addEventListener("click", closeSettings);
 
+  // ---------- Layout ----------
+  function syncDownloadButtonWidth() {
+    var probe = document.createElement("button");
+    probe.className = "download-btn confirm-delete";
+    probe.textContent = "Confirm Delete";
+    probe.style.position = "absolute";
+    probe.style.visibility = "hidden";
+    probe.style.width = "auto";
+    document.body.appendChild(probe);
+    var width = probe.getBoundingClientRect().width;
+    document.body.removeChild(probe);
+    if (width > 0) {
+      document.documentElement.style.setProperty("--download-btn-width", width + "px");
+    }
+  }
+
   // ---------- Init ----------
+  syncDownloadButtonWidth();
   loadConfig();
   updateDropzoneEnabled();
   renderQueue();
