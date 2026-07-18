@@ -52,13 +52,12 @@
   .icon-btn:hover { background: var(--bg2); color: var(--text); }
 
   .dropzone {
-    border: 2px dashed var(--border); border-radius: 12px;
+    border: 3px dashed var(--border); border-radius: 12px;
     padding: 36px 16px; text-align: center; cursor: pointer;
     color: var(--text2); transition: border-color 0.15s, background 0.15s;
   }
   .dropzone svg { display: block; margin: 0 auto 10px; color: var(--text3); }
   .dropzone .dz-title { font-size: 15px; font-weight: 500; color: var(--text); }
-  .dropzone .dz-sub { font-size: 13px; margin-top: 4px; }
   .dropzone.dragover { border-color: var(--accent); background: var(--bg2); }
   .dropzone.disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -168,14 +167,13 @@
     </button>
   </div>
 
-  <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Drag a file here, or click to choose">
+  <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Drag file here or click to choose">
     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
       <polyline points="17 8 12 3 7 8"/>
       <line x1="12" y1="3" x2="12" y2="15"/>
     </svg>
-    <div class="dz-title">Drag a file here, or click to choose</div>
-    <div class="dz-sub">10MB max per file</div>
+    <div class="dz-title">Drag file here or click to choose</div>
   </div>
   <input type="file" id="fileInput" hidden>
 
