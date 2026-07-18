@@ -80,6 +80,13 @@
   }
   .text-btn:hover { color: var(--red); }
   .text-btn:disabled { opacity: 0.5; cursor: default; color: var(--text2); }
+  .mini-icon-btn {
+    border: none; background: none; color: var(--text2); padding: 0;
+    width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
+    border-radius: 6px; cursor: pointer;
+  }
+  .mini-icon-btn:hover { color: var(--text); background: var(--bg2); }
+  .mini-icon-btn:disabled { opacity: 0.5; cursor: default; }
   .refresh-btn {
     display: flex; align-items: center; gap: 5px; border: none; background: none;
     color: var(--text2); font-size: 12px; font-weight: 500; cursor: pointer; padding: 4px 2px;
@@ -102,6 +109,7 @@
     font-size: 13px; font-weight: 500; padding: 8px 14px; border-radius: 8px; cursor: pointer;
   }
   .download-btn:disabled { opacity: 0.6; cursor: default; }
+  .download-btn.confirm-delete { background: var(--text3); }
   .delete-btn {
     flex: 0 0 auto; border: none; background: none; color: var(--text3);
     width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
@@ -180,6 +188,12 @@
         Ctrl-F5 to refresh
       </button>
       <button class="text-btn" id="deleteAllBtn" hidden>Delete all</button>
+      <button class="mini-icon-btn" id="deleteAllCancelBtn" hidden aria-label="Cancel delete all" title="Cancel">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 14 4 9l5-5"/>
+          <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/>
+        </svg>
+      </button>
     </div>
   </div>
   <div id="queueList"></div>
@@ -222,6 +236,10 @@
     loading: false
   };
 
+  var pendingDelete = {}; // path -> true, while a row is armed for delete
+  var pendingOrder = []; // paths in the order they were armed, bottom-of-list order
+  var deleteAllArmed = false;
+
   var el = {
     dropzone: document.getElementById("dropzone"),
     fileInput: document.getElementById("fileInput"),
@@ -229,6 +247,7 @@
     queueList: document.getElementById("queueList"),
     queueLabel: document.getElementById("queueLabel"),
     deleteAllBtn: document.getElementById("deleteAllBtn"),
+    deleteAllCancelBtn: document.getElementById("deleteAllCancelBtn"),
     refreshBtn: document.getElementById("refreshBtn"),
     refreshIcon: document.getElementById("refreshIcon"),
     settingsBtn: document.getElementById("settingsBtn"),
@@ -314,6 +333,10 @@
           .filter(function (i) { return i.type === "file"; })
           .map(function (i) { return { name: displayName(i.name), rawName: i.name, path: i.path, sha: i.sha, size: i.size }; })
           .sort(function (a, b) { return a.rawName < b.rawName ? -1 : 1; });
+        var validPaths = {};
+        state.files.forEach(function (f) { validPaths[f.path] = true; });
+        Object.keys(pendingDelete).forEach(function (p) { if (!validPaths[p]) delete pendingDelete[p]; });
+        pendingOrder = pendingOrder.filter(function (p) { return validPaths[p]; });
         setSpinning(false);
         setStatus("");
         renderQueue();
@@ -405,36 +428,70 @@
     });
   }
 
-  function deleteRow(item, btn) {
-    if (!window.confirm('Delete "' + item.name + '"? This can\'t be undone.')) return;
+  function markPendingDelete(path) {
+    if (pendingDelete[path]) return;
+    pendingDelete[path] = true;
+    pendingOrder.push(path);
+    renderQueue();
+  }
+
+  function cancelPendingDelete(path) {
+    if (!pendingDelete[path]) return;
+    delete pendingDelete[path];
+    pendingOrder = pendingOrder.filter(function (p) { return p !== path; });
+    renderQueue();
+  }
+
+  function confirmDeleteRow(item, btn) {
     btn.disabled = true;
+    btn.textContent = "…";
     deleteFile(item)
       .then(function () {
+        delete pendingDelete[item.path];
+        pendingOrder = pendingOrder.filter(function (p) { return p !== item.path; });
         setStatus(item.name + " deleted.");
         listFiles();
       })
       .catch(function (err) {
         setStatus("Couldn't delete " + item.name + ": " + err.message, true);
         btn.disabled = false;
+        btn.textContent = "Confirm Delete";
       });
   }
 
-  function deleteAllFiles() {
+  function armDeleteAll() {
     if (state.files.length === 0) return;
-    var count = state.files.length;
-    if (!window.confirm("Delete all " + count + (count === 1 ? " file" : " files") + "? This can't be undone.")) return;
+    deleteAllArmed = true;
+    updateDeleteAllButton();
+  }
+
+  function cancelDeleteAll() {
+    deleteAllArmed = false;
+    updateDeleteAllButton();
+  }
+
+  function confirmDeleteAll() {
+    if (state.files.length === 0) return;
     el.deleteAllBtn.disabled = true;
+    el.deleteAllCancelBtn.disabled = true;
     setStatus("Deleting all files…");
     Promise.all(state.files.map(function (f) { return deleteFile(f); }))
       .then(function () {
+        pendingDelete = {};
+        pendingOrder = [];
+        deleteAllArmed = false;
         setStatus("All files deleted.");
         listFiles();
       })
       .catch(function (err) {
         setStatus("Couldn't delete all files: " + err.message, true);
+        deleteAllArmed = false;
         listFiles();
       })
-      .then(function () { el.deleteAllBtn.disabled = false; });
+      .then(function () {
+        el.deleteAllBtn.disabled = false;
+        el.deleteAllCancelBtn.disabled = false;
+      });
   }
 
   // ---------- Rendering ----------
@@ -446,18 +503,43 @@
   function updateQueueLabel() {
     if (!configured() || state.files.length === 0) {
       el.queueLabel.textContent = "Waiting";
-      el.deleteAllBtn.hidden = true;
       return;
     }
     var count = state.files.length;
     var totalBytes = state.files.reduce(function (sum, f) { return sum + f.size; }, 0);
     el.queueLabel.textContent = count + (count === 1 ? " file" : " files") + " · " + humanSize(totalBytes) + " total";
+  }
+
+  function updateDeleteAllButton() {
+    if (!configured() || state.files.length === 0) {
+      el.deleteAllBtn.hidden = true;
+      el.deleteAllCancelBtn.hidden = true;
+      deleteAllArmed = false;
+      return;
+    }
     el.deleteAllBtn.hidden = false;
+    el.deleteAllBtn.textContent = deleteAllArmed ? "Confirm Delete All" : "Delete all";
+    el.deleteAllCancelBtn.hidden = !deleteAllArmed;
+  }
+
+  function orderedFilesForRender() {
+    var normal = state.files.filter(function (f) { return !pendingDelete[f.path]; });
+    var pending = pendingOrder
+      .map(function (path) {
+        var i;
+        for (i = 0; i < state.files.length; i++) {
+          if (state.files[i].path === path) return state.files[i];
+        }
+        return null;
+      })
+      .filter(function (f) { return f; });
+    return normal.concat(pending);
   }
 
   function renderQueue() {
     el.queueList.innerHTML = "";
     updateQueueLabel();
+    updateDeleteAllButton();
     if (!configured()) {
       var setup = document.createElement("div");
       setup.className = "empty-state";
@@ -472,7 +554,7 @@
       el.queueList.appendChild(empty);
       return;
     }
-    state.files.forEach(function (item) {
+    orderedFilesForRender().forEach(function (item) {
       el.queueList.appendChild(renderRow(item));
     });
   }
@@ -501,18 +583,29 @@
     var actions = document.createElement("div");
     actions.className = "file-actions";
 
+    var isPending = !!pendingDelete[item.path];
+
     var btn = document.createElement("button");
-    btn.className = "download-btn";
-    btn.textContent = "Download";
-    btn.addEventListener("click", function () { downloadFile(item, btn); });
+    btn.className = "download-btn" + (isPending ? " confirm-delete" : "");
+    btn.textContent = isPending ? "Confirm Delete" : "Download";
+    btn.addEventListener("click", function () {
+      if (isPending) { confirmDeleteRow(item, btn); } else { downloadFile(item, btn); }
+    });
     actions.appendChild(btn);
 
     var delBtn = document.createElement("button");
     delBtn.className = "delete-btn";
-    delBtn.setAttribute("aria-label", "Delete " + item.name);
-    delBtn.title = "Delete";
-    delBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
-    delBtn.addEventListener("click", function () { deleteRow(item, delBtn); });
+    if (isPending) {
+      delBtn.setAttribute("aria-label", "Restore " + item.name);
+      delBtn.title = "Restore";
+      delBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>';
+      delBtn.addEventListener("click", function () { cancelPendingDelete(item.path); });
+    } else {
+      delBtn.setAttribute("aria-label", "Delete " + item.name);
+      delBtn.title = "Delete";
+      delBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+      delBtn.addEventListener("click", function () { markPendingDelete(item.path); });
+    }
     actions.appendChild(delBtn);
 
     row.appendChild(actions);
@@ -599,7 +692,10 @@
     if (!configured()) { openSettings(); return; }
     listFiles();
   });
-  el.deleteAllBtn.addEventListener("click", deleteAllFiles);
+  el.deleteAllBtn.addEventListener("click", function () {
+    if (deleteAllArmed) { confirmDeleteAll(); } else { armDeleteAll(); }
+  });
+  el.deleteAllCancelBtn.addEventListener("click", cancelDeleteAll);
 
   el.settingsBtn.addEventListener("click", function () { openSettings(); });
   el.settingsClose.addEventListener("click", closeSettings);
