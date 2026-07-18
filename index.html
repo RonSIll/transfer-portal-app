@@ -494,12 +494,12 @@
   function armDeleteAll() {
     if (state.files.length === 0) return;
     deleteAllArmed = true;
-    updateDeleteAllButton();
+    renderQueue();
   }
 
   function cancelDeleteAll() {
     deleteAllArmed = false;
-    updateDeleteAllButton();
+    renderQueue();
   }
 
   function confirmDeleteAll() {
@@ -616,7 +616,8 @@
     var actions = document.createElement("div");
     actions.className = "file-actions";
 
-    var isPending = !!pendingDelete[item.path];
+    var individuallyPending = !!pendingDelete[item.path];
+    var isPending = individuallyPending || deleteAllArmed;
 
     var btn = document.createElement("button");
     btn.className = "download-btn" + (isPending ? " confirm-delete" : "");
@@ -632,7 +633,9 @@
       delBtn.setAttribute("aria-label", "Restore " + item.name);
       delBtn.title = "Restore";
       delBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>';
-      delBtn.addEventListener("click", function () { cancelPendingDelete(item.path); });
+      delBtn.addEventListener("click", function () {
+        if (individuallyPending) { cancelPendingDelete(item.path); } else { cancelDeleteAll(); }
+      });
     } else {
       delBtn.setAttribute("aria-label", "Delete " + item.name);
       delBtn.title = "Delete";
