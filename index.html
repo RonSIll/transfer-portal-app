@@ -105,7 +105,7 @@
   }
   .file-icon { flex: 0 0 auto; color: var(--text3); }
   .file-info { flex: 1 1 auto; min-width: 0; }
-  .file-name { font-size: 14px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-name { font-size: 14px; font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
   .file-size { font-size: 12px; color: var(--text2); margin-top: 2px; }
   .file-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
   .download-btn {
@@ -235,6 +235,7 @@
   var MAX_BYTES = 10 * 1024 * 1024;
   var FILES_DIR = "files";
   var GH_CONFIG_KEY = "transferPortalGithubConfig";
+  var PENDING_DELETE_KEY = "transferPortalPendingDelete";
   var API_VERSION = "2022-11-28";
 
   var state = {
@@ -278,6 +279,18 @@
   }
   function saveConfig() {
     localStorage.setItem(GH_CONFIG_KEY, JSON.stringify(state.gh));
+  }
+
+  function loadPendingDelete() {
+    try {
+      var raw = localStorage.getItem(PENDING_DELETE_KEY);
+      pendingOrder = raw ? JSON.parse(raw) : [];
+    } catch (e) { pendingOrder = []; }
+    pendingDelete = {};
+    pendingOrder.forEach(function (p) { pendingDelete[p] = true; });
+  }
+  function savePendingDelete() {
+    localStorage.setItem(PENDING_DELETE_KEY, JSON.stringify(pendingOrder));
   }
 
   // ---------- Helpers ----------
@@ -342,8 +355,12 @@
           .sort(function (a, b) { return a.rawName < b.rawName ? -1 : 1; });
         var validPaths = {};
         state.files.forEach(function (f) { validPaths[f.path] = true; });
-        Object.keys(pendingDelete).forEach(function (p) { if (!validPaths[p]) delete pendingDelete[p]; });
+        var hadStale = false;
+        Object.keys(pendingDelete).forEach(function (p) {
+          if (!validPaths[p]) { delete pendingDelete[p]; hadStale = true; }
+        });
         pendingOrder = pendingOrder.filter(function (p) { return validPaths[p]; });
+        if (hadStale) savePendingDelete();
         setSpinning(false);
         setStatus("");
         renderQueue();
@@ -439,6 +456,7 @@
     if (pendingDelete[path]) return;
     pendingDelete[path] = true;
     pendingOrder.push(path);
+    savePendingDelete();
     renderQueue();
   }
 
@@ -446,6 +464,7 @@
     if (!pendingDelete[path]) return;
     delete pendingDelete[path];
     pendingOrder = pendingOrder.filter(function (p) { return p !== path; });
+    savePendingDelete();
     renderQueue();
   }
 
@@ -456,6 +475,7 @@
       .then(function () {
         delete pendingDelete[item.path];
         pendingOrder = pendingOrder.filter(function (p) { return p !== item.path; });
+        savePendingDelete();
         setStatus(item.name + " deleted.");
         listFiles();
       })
@@ -486,6 +506,7 @@
       .then(function () {
         pendingDelete = {};
         pendingOrder = [];
+        savePendingDelete();
         deleteAllArmed = false;
         setStatus("All files deleted.");
         listFiles();
@@ -729,6 +750,7 @@
   // ---------- Init ----------
   syncDownloadButtonWidth();
   loadConfig();
+  loadPendingDelete();
   updateDropzoneEnabled();
   renderQueue();
   if (configured()) {
