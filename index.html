@@ -251,7 +251,6 @@
 
   var pendingDelete = {}; // path -> true, while a row is armed for delete
   var pendingOrder = []; // paths in the order they were armed, bottom-of-list order
-  var deleteAllArmed = false;
 
   var el = {
     dropzone: document.getElementById("dropzone"),
@@ -493,32 +492,39 @@
 
   function armDeleteAll() {
     if (state.files.length === 0) return;
-    deleteAllArmed = true;
+    state.files.forEach(function (f) {
+      if (!pendingDelete[f.path]) {
+        pendingDelete[f.path] = true;
+        pendingOrder.push(f.path);
+      }
+    });
+    savePendingDelete();
     renderQueue();
   }
 
   function cancelDeleteAll() {
-    deleteAllArmed = false;
+    pendingDelete = {};
+    pendingOrder = [];
+    savePendingDelete();
     renderQueue();
   }
 
   function confirmDeleteAll() {
-    if (state.files.length === 0) return;
+    var targets = state.files.filter(function (f) { return pendingDelete[f.path]; });
+    if (targets.length === 0) return;
     el.deleteAllBtn.disabled = true;
     el.deleteAllCancelBtn.disabled = true;
-    setStatus("Deleting all files…");
-    Promise.all(state.files.map(function (f) { return deleteFile(f); }))
+    setStatus("Deleting " + targets.length + (targets.length === 1 ? " file" : " files") + "…");
+    Promise.all(targets.map(function (f) { return deleteFile(f); }))
       .then(function () {
         pendingDelete = {};
         pendingOrder = [];
         savePendingDelete();
-        deleteAllArmed = false;
-        setStatus("All files deleted.");
+        setStatus("Deleted.");
         listFiles();
       })
       .catch(function (err) {
-        setStatus("Couldn't delete all files: " + err.message, true);
-        deleteAllArmed = false;
+        setStatus("Couldn't delete: " + err.message, true);
         listFiles();
       })
       .then(function () {
@@ -547,12 +553,19 @@
     if (!configured() || state.files.length === 0) {
       el.deleteAllBtn.hidden = true;
       el.deleteAllCancelBtn.hidden = true;
-      deleteAllArmed = false;
       return;
     }
     el.deleteAllBtn.hidden = false;
-    el.deleteAllBtn.textContent = deleteAllArmed ? "Confirm Delete All" : "Delete all";
-    el.deleteAllCancelBtn.hidden = !deleteAllArmed;
+    if (pendingOrder.length === 0) {
+      el.deleteAllBtn.textContent = "Delete all";
+      el.deleteAllCancelBtn.hidden = true;
+    } else if (pendingOrder.length === state.files.length) {
+      el.deleteAllBtn.textContent = "Confirm Delete All";
+      el.deleteAllCancelBtn.hidden = false;
+    } else {
+      el.deleteAllBtn.textContent = "Delete selected";
+      el.deleteAllCancelBtn.hidden = false;
+    }
   }
 
   function orderedFilesForRender() {
@@ -616,8 +629,7 @@
     var actions = document.createElement("div");
     actions.className = "file-actions";
 
-    var individuallyPending = !!pendingDelete[item.path];
-    var isPending = individuallyPending || deleteAllArmed;
+    var isPending = !!pendingDelete[item.path];
 
     var btn = document.createElement("button");
     btn.className = "download-btn" + (isPending ? " confirm-delete" : "");
@@ -633,9 +645,7 @@
       delBtn.setAttribute("aria-label", "Restore " + item.name);
       delBtn.title = "Restore";
       delBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>';
-      delBtn.addEventListener("click", function () {
-        if (individuallyPending) { cancelPendingDelete(item.path); } else { cancelDeleteAll(); }
-      });
+      delBtn.addEventListener("click", function () { cancelPendingDelete(item.path); });
     } else {
       delBtn.setAttribute("aria-label", "Delete " + item.name);
       delBtn.title = "Delete";
@@ -729,7 +739,7 @@
     listFiles();
   });
   el.deleteAllBtn.addEventListener("click", function () {
-    if (deleteAllArmed) { confirmDeleteAll(); } else { armDeleteAll(); }
+    if (pendingOrder.length === 0) { armDeleteAll(); } else { confirmDeleteAll(); }
   });
   el.deleteAllCancelBtn.addEventListener("click", cancelDeleteAll);
 
