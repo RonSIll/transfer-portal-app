@@ -239,6 +239,7 @@
 
   var MAX_BYTES = 10 * 1024 * 1024;
   var FILES_DIR = "files";
+  var PENDING_FILE = "_pending_delete.json";
   var GH_CONFIG_KEY = "transferPortalGithubConfig";
   var PENDING_DELETE_KEY = "transferPortalPendingDelete";
   var API_VERSION = "2022-11-28";
@@ -246,7 +247,8 @@
   var state = {
     gh: null, // { owner, repo, pat }
     files: [], // [{ name, path, sha, size }]
-    loading: false
+    loading: false,
+    pendingSha: null // sha of the shared pending-delete file in the data repo, null if it doesn't exist yet
   };
 
   var pendingDelete = {}; // path -> true, while a row is armed for delete
@@ -343,28 +345,78 @@
     };
   }
 
+  function fetchPendingDelete() {
+    return fetch(apiUrl(PENDING_FILE), { headers: jsonHeaders() })
+      .then(function (res) {
+        if (res.status === 404) { state.pendingSha = null; return []; }
+        if (!res.ok) throw new Error("Pending-delete fetch failed (" + res.status + ")");
+        return res.json();
+      })
+      .then(function (data) {
+        if (!data || !data.content) return [];
+        state.pendingSha = data.sha;
+        try {
+          var parsed = JSON.parse(atob(data.content.replace(/\n/g, "")));
+          return Array.isArray(parsed) ? parsed : [];
+        } catch (e) { return []; }
+      });
+  }
+
+  function savePendingDeleteRemote(isRetry) {
+    var body = {
+      message: "Transfer Portal: update pending-delete state",
+      content: btoa(JSON.stringify(pendingOrder))
+    };
+    if (state.pendingSha) body.sha = state.pendingSha;
+    return fetch(apiUrl(PENDING_FILE), {
+      method: "PUT",
+      headers: Object.assign({ "Content-Type": "application/json" }, jsonHeaders()),
+      body: JSON.stringify(body)
+    })
+      .then(function (res) {
+        if (res.status === 409 && !isRetry) {
+          return fetchPendingDelete().then(function () { return savePendingDeleteRemote(true); });
+        }
+        if (!res.ok) throw new Error("Pending-delete save failed (" + res.status + ")");
+        return res.json();
+      })
+      .then(function (data) {
+        if (data && data.content) state.pendingSha = data.content.sha;
+      });
+  }
+
+  function syncPendingDelete() {
+    savePendingDelete();
+    savePendingDeleteRemote().catch(function (err) {
+      setStatus("Marked locally, but couldn't sync to the other computer: " + err.message, true);
+    });
+  }
+
   function listFiles() {
     if (!configured()) { renderQueue(); return; }
     setSpinning(true);
-    fetch(apiUrl(FILES_DIR), { headers: jsonHeaders() })
-      .then(function (res) {
+    Promise.all([
+      fetch(apiUrl(FILES_DIR), { headers: jsonHeaders() }).then(function (res) {
         if (res.status === 404) return [];
         if (!res.ok) throw new Error("List failed (" + res.status + ")");
         return res.json();
-      })
-      .then(function (items) {
+      }),
+      fetchPendingDelete()
+    ])
+      .then(function (results) {
+        var items = results[0];
+        var remotePending = results[1];
         state.files = items
           .filter(function (i) { return i.type === "file"; })
           .map(function (i) { return { name: displayName(i.name), rawName: i.name, path: i.path, sha: i.sha, size: i.size }; })
           .sort(function (a, b) { return a.rawName < b.rawName ? -1 : 1; });
         var validPaths = {};
         state.files.forEach(function (f) { validPaths[f.path] = true; });
-        var hadStale = false;
-        Object.keys(pendingDelete).forEach(function (p) {
-          if (!validPaths[p]) { delete pendingDelete[p]; hadStale = true; }
-        });
-        pendingOrder = pendingOrder.filter(function (p) { return validPaths[p]; });
-        if (hadStale) savePendingDelete();
+        pendingOrder = remotePending.filter(function (p) { return validPaths[p]; });
+        pendingDelete = {};
+        pendingOrder.forEach(function (p) { pendingDelete[p] = true; });
+        savePendingDelete();
+        if (pendingOrder.length !== remotePending.length) syncPendingDelete();
         setSpinning(false);
         setStatus("");
         renderQueue();
@@ -460,7 +512,7 @@
     if (pendingDelete[path]) return;
     pendingDelete[path] = true;
     pendingOrder.push(path);
-    savePendingDelete();
+    syncPendingDelete();
     renderQueue();
   }
 
@@ -468,7 +520,7 @@
     if (!pendingDelete[path]) return;
     delete pendingDelete[path];
     pendingOrder = pendingOrder.filter(function (p) { return p !== path; });
-    savePendingDelete();
+    syncPendingDelete();
     renderQueue();
   }
 
@@ -479,7 +531,7 @@
       .then(function () {
         delete pendingDelete[item.path];
         pendingOrder = pendingOrder.filter(function (p) { return p !== item.path; });
-        savePendingDelete();
+        syncPendingDelete();
         setStatus(item.name + " deleted.");
         listFiles();
       })
@@ -498,14 +550,14 @@
         pendingOrder.push(f.path);
       }
     });
-    savePendingDelete();
+    syncPendingDelete();
     renderQueue();
   }
 
   function cancelDeleteAll() {
     pendingDelete = {};
     pendingOrder = [];
-    savePendingDelete();
+    syncPendingDelete();
     renderQueue();
   }
 
@@ -519,7 +571,7 @@
       .then(function () {
         pendingDelete = {};
         pendingOrder = [];
-        savePendingDelete();
+        syncPendingDelete();
         setStatus("Deleted.");
         listFiles();
       })
