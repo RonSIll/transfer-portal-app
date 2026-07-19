@@ -72,6 +72,16 @@
   }
   .status-line.error { color: var(--red); }
 
+  .scratch-text {
+    display: block; width: 100%; box-sizing: border-box; resize: vertical;
+    min-height: 80px; margin-top: 14px; border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 14px; font-size: 14px; font-family: inherit; color: var(--text); background: var(--bg);
+  }
+  .scratch-text::placeholder { color: var(--text2); }
+  .scratch-text:disabled { opacity: 0.5; cursor: not-allowed; }
+  .scratch-footer { display: flex; align-items: center; justify-content: flex-end; min-height: 18px; margin-top: 4px; }
+  .scratch-footer .sync-note { margin-top: 0; margin-right: auto; }
+
   .queue-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 22px 2px 8px;
@@ -193,6 +203,12 @@
 
   <div class="status-line" id="statusLine"></div>
 
+  <textarea class="scratch-text" id="scratchText" placeholder="Type or paste text" rows="4"></textarea>
+  <div class="scratch-footer">
+    <span class="sync-note" id="scratchNote"></span>
+    <button class="text-btn" id="scratchClearBtn" hidden>Clear</button>
+  </div>
+
   <div class="queue-header">
     <span class="label" id="queueLabel">Waiting</span>
     <div class="header-controls">
@@ -254,6 +270,7 @@
   var MAX_BYTES = 10 * 1024 * 1024;
   var FILES_DIR = "files";
   var PENDING_FILE = "_pending_delete.json";
+  var SCRATCH_FILE = "_scratch_text.txt";
   var GH_CONFIG_KEY = "transferPortalGithubConfig";
   var PENDING_DELETE_KEY = "transferPortalPendingDelete";
   var API_VERSION = "2022-11-28";
@@ -262,8 +279,10 @@
     gh: null, // { owner, repo, pat }
     files: [], // [{ name, path, sha, size }]
     loading: false,
-    pendingSha: null // sha of the shared pending-delete file in the data repo, null if it doesn't exist yet
+    pendingSha: null, // sha of the shared pending-delete file in the data repo, null if it doesn't exist yet
+    scratchSha: null // sha of the shared scratch-text file in the data repo, null if it doesn't exist yet
   };
+  var scratchSaveTimer = null;
 
   var pendingDelete = {}; // path -> true, while a row is armed for delete
   var pendingOrder = []; // paths in the order they were armed, bottom-of-list order
@@ -291,7 +310,10 @@
     previewSheet: document.getElementById("previewSheet"),
     previewTitle: document.getElementById("previewTitle"),
     previewBody: document.getElementById("previewBody"),
-    previewClose: document.getElementById("previewClose")
+    previewClose: document.getElementById("previewClose"),
+    scratchText: document.getElementById("scratchText"),
+    scratchNote: document.getElementById("scratchNote"),
+    scratchClearBtn: document.getElementById("scratchClearBtn")
   };
 
   // ---------- Config persistence ----------
@@ -343,12 +365,23 @@
     return btoa(chunks.join(""));
   }
 
+  function utf8ToBase64(str) {
+    return arrayBufferToBase64(new TextEncoder().encode(str).buffer);
+  }
+  function base64ToUtf8(b64) {
+    var binary = atob(b64.replace(/\n/g, ""));
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+
   function configured() {
     return !!(state.gh && state.gh.owner && state.gh.repo && state.gh.pat);
   }
 
   function updateDropzoneEnabled() {
     el.dropzone.classList.toggle("disabled", !configured());
+    el.scratchText.disabled = !configured();
   }
 
   // ---------- GitHub API ----------
@@ -410,6 +443,58 @@
     });
   }
 
+  function fetchScratchText() {
+    return fetch(apiUrl(SCRATCH_FILE), { headers: jsonHeaders() })
+      .then(function (res) {
+        if (res.status === 404) { state.scratchSha = null; return ""; }
+        if (!res.ok) throw new Error("Notes fetch failed (" + res.status + ")");
+        return res.json();
+      })
+      .then(function (data) {
+        if (!data || !data.content) return "";
+        state.scratchSha = data.sha;
+        try { return base64ToUtf8(data.content); } catch (e) { return ""; }
+      });
+  }
+
+  function saveScratchTextRemote(text, isRetry) {
+    var body = {
+      message: "Transfer Portal: update notes",
+      content: utf8ToBase64(text)
+    };
+    if (state.scratchSha) body.sha = state.scratchSha;
+    return fetch(apiUrl(SCRATCH_FILE), {
+      method: "PUT",
+      headers: Object.assign({ "Content-Type": "application/json" }, jsonHeaders()),
+      body: JSON.stringify(body)
+    })
+      .then(function (res) {
+        if (res.status === 409 && !isRetry) {
+          return fetchScratchText().then(function () { return saveScratchTextRemote(text, true); });
+        }
+        if (!res.ok) throw new Error("Notes save failed (" + res.status + ")");
+        return res.json();
+      })
+      .then(function (data) {
+        if (data && data.content) state.scratchSha = data.content.sha;
+      });
+  }
+
+  function scheduleScratchSave() {
+    if (!configured()) return;
+    el.scratchNote.textContent = "Saving…";
+    el.scratchNote.className = "sync-note";
+    if (scratchSaveTimer) clearTimeout(scratchSaveTimer);
+    scratchSaveTimer = setTimeout(function () {
+      saveScratchTextRemote(el.scratchText.value)
+        .then(function () { el.scratchNote.textContent = ""; })
+        .catch(function (err) {
+          el.scratchNote.textContent = "Couldn't sync notes: " + err.message;
+          el.scratchNote.className = "sync-note error";
+        });
+    }, 800);
+  }
+
   function listFiles() {
     if (!configured()) { renderQueue(); return; }
     setSpinning(true);
@@ -419,11 +504,17 @@
         if (!res.ok) throw new Error("List failed (" + res.status + ")");
         return res.json();
       }),
-      fetchPendingDelete()
+      fetchPendingDelete(),
+      fetchScratchText()
     ])
       .then(function (results) {
         var items = results[0];
         var remotePending = results[1];
+        var scratch = results[2];
+        if (document.activeElement !== el.scratchText) {
+          el.scratchText.value = scratch;
+          el.scratchClearBtn.hidden = scratch.length === 0;
+        }
         state.files = items
           .filter(function (i) { return i.type === "file"; })
           .map(function (i) { return { name: displayName(i.name), rawName: i.name, path: i.path, sha: i.sha, size: i.size }; })
@@ -854,6 +945,15 @@
   el.settingsCancel.addEventListener("click", closeSettings);
   el.settingsSave.addEventListener("click", saveSettings);
   el.previewClose.addEventListener("click", closePreview);
+  el.scratchText.addEventListener("input", function () {
+    el.scratchClearBtn.hidden = el.scratchText.value.length === 0;
+    scheduleScratchSave();
+  });
+  el.scratchClearBtn.addEventListener("click", function () {
+    el.scratchText.value = "";
+    el.scratchClearBtn.hidden = true;
+    scheduleScratchSave();
+  });
   el.backdrop.addEventListener("click", function () {
     if (!el.previewSheet.hidden) { closePreview(); } else { closeSettings(); }
   });
