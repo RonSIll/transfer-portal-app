@@ -541,15 +541,17 @@
     return idx === -1 ? rawName : rawName.slice(idx + 2);
   }
 
-  function uploadFile(file) {
-    if (!configured()) { openSettings("Set up sync before sending a file."); return; }
+  function uploadFile(file, done) {
+    function finish() { if (done) done(); }
+    if (!configured()) { openSettings("Set up sync before sending a file."); finish(); return; }
     if (file.size > MAX_BYTES) {
       setStatus(file.name + " is over the 10MB limit.", true);
+      finish();
       return;
     }
     setStatus("Uploading " + file.name + "…");
     var reader = new FileReader();
-    reader.onerror = function () { setStatus("Couldn't read " + file.name + ".", true); };
+    reader.onerror = function () { setStatus("Couldn't read " + file.name + ".", true); finish(); };
     reader.onload = function () {
       var b64 = arrayBufferToBase64(reader.result);
       var path = FILES_DIR + "/" + Date.now() + "__" + sanitizeName(file.name);
@@ -568,7 +570,8 @@
         })
         .catch(function (err) {
           setStatus("Couldn't send " + file.name + ": " + err.message, true);
-        });
+        })
+        .then(finish);
     };
     reader.readAsArrayBuffer(file);
   }
@@ -675,23 +678,40 @@
     if (targets.length === 0) return;
     el.deleteAllBtn.disabled = true;
     el.deleteAllCancelBtn.disabled = true;
-    setStatus("Deleting " + targets.length + (targets.length === 1 ? " file" : " files") + "…");
-    Promise.all(targets.map(function (f) { return deleteFile(f); }))
-      .then(function () {
-        pendingDelete = {};
-        pendingOrder = [];
+    var index = 0;
+    var failedNames = [];
+    // Deleted one at a time, not with Promise.all: the Contents API commits each
+    // write against the current branch HEAD, so concurrent deletes race for the
+    // same commit and all but one come back as conflicts.
+    function next() {
+      if (index >= targets.length) {
         syncPendingDelete();
-        setStatus("Deleted.");
+        if (failedNames.length > 0) {
+          setStatus("Deleted " + (targets.length - failedNames.length) + " of " + targets.length + " files. Couldn't delete: " + failedNames.join(", "), true);
+        } else {
+          setStatus("Deleted.");
+        }
         listFiles();
-      })
-      .catch(function (err) {
-        setStatus("Couldn't delete: " + err.message, true);
-        listFiles();
-      })
-      .then(function () {
         el.deleteAllBtn.disabled = false;
         el.deleteAllCancelBtn.disabled = false;
-      });
+        return;
+      }
+      var f = targets[index];
+      setStatus("Deleting " + (index + 1) + " of " + targets.length + "…");
+      deleteFile(f)
+        .then(function () {
+          delete pendingDelete[f.path];
+          pendingOrder = pendingOrder.filter(function (p) { return p !== f.path; });
+        })
+        .catch(function () {
+          failedNames.push(f.name);
+        })
+        .then(function () {
+          index++;
+          next();
+        });
+    }
+    next();
   }
 
   // ---------- Rendering ----------
@@ -903,7 +923,17 @@
   // ---------- Drag and drop ----------
   function handleFiles(fileList) {
     if (!fileList || fileList.length === 0) return;
-    Array.prototype.forEach.call(fileList, uploadFile);
+    // Uploaded one at a time: concurrent Contents API writes race for the
+    // same commit ref, so dropping several files at once would lose all but one.
+    var files = Array.prototype.slice.call(fileList);
+    var index = 0;
+    function next() {
+      if (index >= files.length) return;
+      var file = files[index];
+      index++;
+      uploadFile(file, next);
+    }
+    next();
   }
 
   el.dropzone.addEventListener("click", function () {
