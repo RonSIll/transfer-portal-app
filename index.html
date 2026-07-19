@@ -108,7 +108,7 @@
     background: var(--bg2); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px;
   }
   .file-icon { flex: 0 0 auto; color: var(--text3); }
-  .file-info { flex: 1 1 auto; min-width: 0; }
+  .file-info { flex: 1 1 auto; min-width: 0; cursor: pointer; }
   .file-name { font-size: 14px; font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
   .file-size { font-size: 12px; color: var(--text2); margin-top: 2px; }
   .file-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
@@ -159,6 +159,11 @@
   .sync-note { font-size: 12px; margin-top: 10px; }
   .sync-note.error { color: var(--red); }
   .sync-note.ok { color: var(--text2); }
+  .preview-body {
+    max-height: 50vh; overflow: auto; white-space: pre-wrap; word-break: break-word;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
+    background: var(--bg2); color: var(--text); padding: 12px; border-radius: 8px; margin-top: 10px;
+  }
 </style>
 </head>
 <body>
@@ -233,6 +238,15 @@
   <div class="sync-note" id="syncNote"></div>
 </div>
 
+<div class="sheet" id="previewSheet" hidden>
+  <div class="sheet-header">
+    <span class="sheet-header-spacer"></span>
+    <span class="sheet-title" id="previewTitle"></span>
+    <button id="previewClose">&#10005;</button>
+  </div>
+  <pre class="preview-body" id="previewBody"></pre>
+</div>
+
 <script>
 (function () {
   "use strict";
@@ -273,7 +287,11 @@
     ghOwner: document.getElementById("ghOwner"),
     ghRepo: document.getElementById("ghRepo"),
     ghPat: document.getElementById("ghPat"),
-    syncNote: document.getElementById("syncNote")
+    syncNote: document.getElementById("syncNote"),
+    previewSheet: document.getElementById("previewSheet"),
+    previewTitle: document.getElementById("previewTitle"),
+    previewBody: document.getElementById("previewBody"),
+    previewClose: document.getElementById("previewClose")
   };
 
   // ---------- Config persistence ----------
@@ -668,6 +686,13 @@
 
     var info = document.createElement("div");
     info.className = "file-info";
+    info.tabIndex = 0;
+    info.setAttribute("role", "button");
+    info.setAttribute("aria-label", "Preview " + item.name);
+    info.addEventListener("click", function () { openPreview(item); });
+    info.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPreview(item); }
+    });
     var name = document.createElement("div");
     name.className = "file-name";
     name.textContent = item.name;
@@ -709,6 +734,35 @@
     row.appendChild(actions);
 
     return row;
+  }
+
+  // ---------- Preview sheet ----------
+  function openPreview(item) {
+    el.previewTitle.textContent = item.name;
+    el.previewBody.textContent = "Loading…";
+    el.backdrop.hidden = false;
+    el.previewSheet.hidden = false;
+    fetch(apiUrl(item.path), {
+      headers: {
+        Authorization: "token " + state.gh.pat,
+        Accept: "application/vnd.github.raw+json",
+        "X-GitHub-Api-Version": API_VERSION
+      }
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error("Preview failed (" + res.status + ")");
+        return res.text();
+      })
+      .then(function (text) {
+        el.previewBody.textContent = text;
+      })
+      .catch(function (err) {
+        el.previewBody.textContent = "Couldn't load preview: " + err.message;
+      });
+  }
+  function closePreview() {
+    el.backdrop.hidden = true;
+    el.previewSheet.hidden = true;
   }
 
   // ---------- Settings sheet ----------
@@ -799,7 +853,10 @@
   el.settingsClose.addEventListener("click", closeSettings);
   el.settingsCancel.addEventListener("click", closeSettings);
   el.settingsSave.addEventListener("click", saveSettings);
-  el.backdrop.addEventListener("click", closeSettings);
+  el.previewClose.addEventListener("click", closePreview);
+  el.backdrop.addEventListener("click", function () {
+    if (!el.previewSheet.hidden) { closePreview(); } else { closeSettings(); }
+  });
 
   // ---------- Layout ----------
   function syncDownloadButtonWidth() {
