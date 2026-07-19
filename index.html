@@ -425,7 +425,7 @@
       body: JSON.stringify(body)
     })
       .then(function (res) {
-        if (res.status === 409 && !isRetry) {
+        if ((res.status === 409 || res.status === 422) && !isRetry) {
           return fetchPendingDelete().then(function () { return savePendingDeleteRemote(true); });
         }
         if (!res.ok) throw new Error("Pending-delete save failed (" + res.status + ")");
@@ -469,7 +469,7 @@
       body: JSON.stringify(body)
     })
       .then(function (res) {
-        if (res.status === 409 && !isRetry) {
+        if ((res.status === 409 || res.status === 422) && !isRetry) {
           return fetchScratchText().then(function () { return saveScratchTextRemote(text, true); });
         }
         if (!res.ok) throw new Error("Notes save failed (" + res.status + ")");
